@@ -1,0 +1,10 @@
+{
+  "name": "tezca-fastapi",
+  "version": "0.1.0",
+  "description": "Scaffold and grow FastAPI projects with a strict layered architecture: core (config, async SQLAlchemy, logging, integrations), per-feature models/dao/datasource/repository/service/router, Alembic migrations in sql/, Docker and docker-compose.",
+  "author": {
+    "name": "AchsDCerrillo",
+    "email": "achscerrillo@gmail.com"
+  },
+  "keywords": ["fastapi", "sqlalchemy", "alembic", "docker", "scaffolding", "python"]
+}

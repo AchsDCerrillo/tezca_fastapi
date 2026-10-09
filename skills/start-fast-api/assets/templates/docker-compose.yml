@@ -1,0 +1,51 @@
+# Local stack: database -> migrate (alembic upgrade head) -> api
+# `docker compose up --build` rebuilds the image, applies every pending migration, then starts the API.
+
+x-app: &app
+  build: .
+  image: {{PROJECT_SLUG}}:latest
+  env_file: .env.dev
+  environment:
+    ENVIRONMENT: dev
+    DATABASE_HOST: db
+    DATABASE_PORT: "{{DB_CONTAINER_PORT}}"
+
+services:
+  db:
+    # Database service ({{DATABASE_LABEL}})
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: {{DATABASE_USER}}
+      POSTGRES_PASSWORD: {{DATABASE_PASSWORD}}
+      POSTGRES_DB: {{DATABASE_NAME}}
+    ports:
+      - "{{DATABASE_PORT}}:{{DB_CONTAINER_PORT}}"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{DATABASE_USER}} -d {{DATABASE_NAME}}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    <<: *app
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  db_data:

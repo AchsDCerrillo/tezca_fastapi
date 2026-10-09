@@ -1,0 +1,16 @@
+{
+  "name": "tezca-fastapi-marketplace",
+  "description": "Tezca FastAPI scaffolding plugin",
+  "owner": {
+    "name": "AchsDCerrillo",
+    "email": "achscerrillo@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "tezca-fastapi",
+      "source": "./",
+      "description": "FastAPI layered-architecture scaffolding: start-fast-api, add-new-feature, add-core, work-dao, work-datastore, work-repository, work-service.",
+      "version": "0.1.0"
+    }
+  ]
+}
