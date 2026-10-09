@@ -26,31 +26,36 @@ claude --plugin-dir ~/Desktop/tezca_fastapi_plugin
 
 After pulling new plugin changes: `/plugin marketplace update tezca-fastapi-marketplace`.
 
-### Other agents (Codex, OpenCode, Gemini CLI, Antigravity, Copilot, Cursor)
+### Installer script (Claude plugin + Codex, OpenCode, Gemini CLI, Antigravity, Copilot, Cursor)
 
-`install-skills.sh` copies the skills, as standalone [Agent Skills](https://agentskills.io) folders, into other agents:
+`install-skills.sh` installs everything in one go:
+- **Claude Code:** `claude-plugin` installs this repo as a real plugin through the Claude marketplace. It runs `claude plugin marketplace add/update` and then `claude plugin install --scope project|user`.
+- **Other agents:** the skills are copied as standalone [Agent Skills](https://agentskills.io) folders.
 
 ```bash
 ./install-skills.sh                                                     # interactive: asks project vs user level + agents
 ./install-skills.sh --scope project --agents all --project-dir ~/code/my-api
 ./install-skills.sh --scope user --agents codex,gemini,antigravity
+./install-skills.sh --scope project --agents claude-plugin --project-dir ~/code/my-api   # Claude marketplace plugin
 ./install-skills.sh --dry-run ...                                       # show what would change
 ./install-skills.sh --uninstall --scope project --agents all --project-dir ~/code/my-api
 ```
 
 | Agent | Project level | User level |
 |---|---|---|
+| `claude-plugin` (Claude Code, recommended) | `.claude/settings.json` via `claude plugin --scope project` | `~/.claude` via `claude plugin --scope user` |
 | Codex, OpenCode, Copilot | `.agents/skills/` | `~/.agents/skills/` |
 | Gemini CLI | `.agents/skills/` | `~/.gemini/skills/` |
 | Antigravity | `.agents/skills/` | `~/.gemini/config/skills/` |
 | Cursor | `.agents/skills/` | not supported |
-| Claude Code (plain skills) | `.claude/skills/` | `~/.claude/skills/` |
+| `claude` (Claude Code plain skills, skipped when `claude-plugin` is selected) | `.claude/skills/` | `~/.claude/skills/` |
 
 How the script avoids breaking existing setups:
 - **Prefixed names:** skills are installed as `tezca-<skill>` folders, so they never clash with your own skills.
 - **Self-contained folders:** each folder holds its own copy of the shared conventions (`shared/`), and plugin-only paths are rewritten.
 - **Marker files:** every installed folder gets a `.tezca-fastapi-install` marker. Re-running the script updates only marked folders. A same-named folder without the marker is skipped, and uninstall removes only marked folders.
-- **No config edits:** agent config files (settings, `opencode.json`, `AGENTS.md`, …) are never touched.
+- **No config edits:** the script never edits agent config files itself (settings, `opencode.json`, `AGENTS.md`, …). `claude-plugin` goes through Claude's own `claude plugin` CLI, which merges its entries into your settings and keeps everything else.
+- **Marketplace source:** by default this is the repo's `origin` remote (or this folder if there is none); override it with `--marketplace-source`. Uninstalling the Claude plugin keeps the marketplace entry; remove it with `claude plugin marketplace remove tezca-fastapi-marketplace`.
 
 Re-run the script after pulling plugin updates.
 
