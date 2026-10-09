@@ -18,12 +18,28 @@ In any project, from Claude Code:
 /plugin install tezca-fastapi@tezca-fastapi-marketplace
 ```
 
-Or from a terminal (`--scope project` shares it with your team via `.claude/settings.json`; the default is `user`):
+> The repository is private. Anyone installing needs read access to it and git credentials (`gh auth login` or SSH). For automatic background updates, also set `GITHUB_TOKEN` (or `GH_TOKEN`) in your shell.
+
+#### Install only at project level
+
+Run these from the project's root folder; project scope writes to the `.claude/settings.json` of the current directory:
 
 ```bash
-claude plugin marketplace add https://github.com/AchsDCerrillo/tezca_fastapi.git --scope project
+cd ~/code/my-api
+claude plugin marketplace add AchsDCerrillo/tezca_fastapi --scope project
 claude plugin install tezca-fastapi@tezca-fastapi-marketplace --scope project
 ```
+
+This adds `extraKnownMarketplaces` (pointing to this repo) and `enabledPlugins` (`"tezca-fastapi@tezca-fastapi-marketplace": true`) to `.claude/settings.json`. Your other settings are kept. Commit that file: teammates who open the project in Claude Code are prompted to install the plugin.
+
+Other ways to do the same:
+- **Inside Claude Code:** `/plugin marketplace add AchsDCerrillo/tezca_fastapi`, then `/plugin`, select **tezca-fastapi**, and choose the **project** scope.
+- **Installer script:** `./install-skills.sh --scope project --agents claude-plugin --project-dir ~/code/my-api`.
+- **Only for you in this project:** use `--scope local`, which writes to `.claude/settings.local.json` (not committed).
+
+Claude keeps its downloaded copy under `~/.claude/plugins/`, but the plugin is only enabled in that project.
+
+Remove it: `claude plugin uninstall tezca-fastapi@tezca-fastapi-marketplace --scope project`.
 
 After new plugin versions are pushed: `/plugin marketplace update tezca-fastapi-marketplace`.
 
