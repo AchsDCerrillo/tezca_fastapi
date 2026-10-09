@@ -26,6 +26,34 @@ claude --plugin-dir ~/Desktop/tezca_fastapi_plugin
 
 After pulling new plugin changes: `/plugin marketplace update tezca-fastapi-marketplace`.
 
+### Other agents (Codex, OpenCode, Gemini CLI, Antigravity, Copilot, Cursor)
+
+`install-skills.sh` copies the skills, as standalone [Agent Skills](https://agentskills.io) folders, into other agents:
+
+```bash
+./install-skills.sh                                                     # interactive: asks project vs user level + agents
+./install-skills.sh --scope project --agents all --project-dir ~/code/my-api
+./install-skills.sh --scope user --agents codex,gemini,antigravity
+./install-skills.sh --dry-run ...                                       # show what would change
+./install-skills.sh --uninstall --scope project --agents all --project-dir ~/code/my-api
+```
+
+| Agent | Project level | User level |
+|---|---|---|
+| Codex, OpenCode, Copilot | `.agents/skills/` | `~/.agents/skills/` |
+| Gemini CLI | `.agents/skills/` | `~/.gemini/skills/` |
+| Antigravity | `.agents/skills/` | `~/.gemini/config/skills/` |
+| Cursor | `.agents/skills/` | not supported |
+| Claude Code (plain skills) | `.claude/skills/` | `~/.claude/skills/` |
+
+How the script avoids breaking existing setups:
+- **Prefixed names:** skills are installed as `tezca-<skill>` folders, so they never clash with your own skills.
+- **Self-contained folders:** each folder holds its own copy of the shared conventions (`shared/`), and plugin-only paths are rewritten.
+- **Marker files:** every installed folder gets a `.tezca-fastapi-install` marker. Re-running the script updates only marked folders. A same-named folder without the marker is skipped, and uninstall removes only marked folders.
+- **No config edits:** agent config files (settings, `opencode.json`, `AGENTS.md`, …) are never touched.
+
+Re-run the script after pulling plugin updates.
+
 ## Skills
 
 | Skill | What it does |
@@ -70,6 +98,7 @@ references/               shared conventions every skill reads (architecture, mo
                           repository, service, router, migrations, integrations/*)
 skills/<skill>/SKILL.md   workflows
 skills/start-fast-api/assets/templates/   the files copied into new projects
+install-skills.sh         installs the skills into other agents (Codex, OpenCode, Gemini, ...)
 ```
 
 To change a convention, edit it in `references/`. All skills pick it up.
