@@ -8,25 +8,39 @@ router → service → repository → dao / datasource → database / external s
 
 ## Install
 
-Push this folder to a git repository, then in any project:
+Repository: https://github.com/AchsDCerrillo/tezca_fastapi
+
+### Claude Code (plugin)
+In any project, from Claude Code:
 
 ```
-/plugin marketplace add <git-url-or-owner/repo>
+/plugin marketplace add AchsDCerrillo/tezca_fastapi
 /plugin install tezca-fastapi@tezca-fastapi-marketplace
 ```
+
+Or from a terminal (`--scope project` shares it with your team via `.claude/settings.json`; the default is `user`):
+
+```bash
+claude plugin marketplace add https://github.com/AchsDCerrillo/tezca_fastapi.git --scope project
+claude plugin install tezca-fastapi@tezca-fastapi-marketplace --scope project
+```
+
+After new plugin versions are pushed: `/plugin marketplace update tezca-fastapi-marketplace`.
 
 During local development of the plugin itself:
 
-```
-/plugin marketplace add ~/Desktop/tezca_fastapi_plugin
-/plugin install tezca-fastapi@tezca-fastapi-marketplace
-# or, for one session only:
-claude --plugin-dir ~/Desktop/tezca_fastapi_plugin
+```bash
+claude --plugin-dir ~/Desktop/tezca_fastapi_plugin     # one session only
 ```
 
-After pulling new plugin changes: `/plugin marketplace update tezca-fastapi-marketplace`.
+### Any agent (installer script)
 
-### Installer script (Claude plugin + Codex, OpenCode, Gemini CLI, Antigravity, Copilot, Cursor)
+```bash
+git clone https://github.com/AchsDCerrillo/tezca_fastapi.git ~/tezca_fastapi
+~/tezca_fastapi/install-skills.sh                      # asks: project or user level, which agents
+```
+
+#### Installer details (Claude plugin + Codex, OpenCode, Gemini CLI, Antigravity, Copilot, Cursor)
 
 `install-skills.sh` installs everything in one go:
 - **Claude Code:** `claude-plugin` installs this repo as a real plugin through the Claude marketplace. It runs `claude plugin marketplace add/update` and then `claude plugin install --scope project|user`.
