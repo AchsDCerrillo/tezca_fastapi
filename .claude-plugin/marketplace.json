@@ -10,7 +10,7 @@
       "name": "tezca-fastapi",
       "source": "./",
       "description": "FastAPI layered-architecture scaffolding: start-fast-api, add-new-feature, add-core, work-dao, work-datastore, work-repository, work-service.",
-      "version": "0.1.0"
+      "version": "0.2.0"
     }
   ]
 }

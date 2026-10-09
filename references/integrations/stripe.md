@@ -30,12 +30,16 @@ from typing import Any
 import stripe
 
 from app.core.config import get_settings
+from app.core.exceptions import ExternalServiceError
 
 logger = logging.getLogger(__name__)
 
 
-class PaymentsError(Exception):
-    """Payment provider rejected or failed the operation."""
+class PaymentsError(ExternalServiceError):
+    """Payment provider rejected or failed the operation (-> 502, code payments_error)."""
+
+    code = "payments_error"
+    message = "Payment provider error"
 
 
 class PaymentsGateway:
@@ -81,7 +85,7 @@ class PaymentsGateway:
             raise PaymentsError(str(exc)) from exc
 
     def parse_webhook(self, payload: bytes, signature: str | None) -> stripe.Event:
-        """Raises ValueError / stripe.SignatureVerificationError when invalid -> map to 400 in the service."""
+        """Raises ValueError / stripe.SignatureVerificationError when invalid; the service turns it into BadRequestError."""
         return self.client.construct_event(payload, signature, self.webhook_secret)
 
 

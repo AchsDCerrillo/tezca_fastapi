@@ -1,0 +1,125 @@
+name: Release - test, build, push & update compose
+
+# Publish a GitHub release to ship:
+#   v1.4.0          -> prod: pushes IMAGE:v1.4.0 + IMAGE:latest, updates docker-compose.prod.yml
+#   v1.4.0-dev.1    -> dev:  pushes IMAGE:v1.4.0-dev.1 + IMAGE:dev, updates docker-compose.dev.yml
+#   (any tag containing "-dev" or "-st" is treated as dev)
+on:
+  release:
+    types: [published]
+
+env:
+  IMAGE: {{IMAGE_REPOSITORY}}
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # 1. Same lint + test gate as every PR (.github/workflows/ci.yml)
+  # ─────────────────────────────────────────────────────────────
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  # ─────────────────────────────────────────────────────────────
+  # 2. Build & push the Docker image
+  # ─────────────────────────────────────────────────────────────
+  publish-image:
+    name: Build & Push
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # GHCR
+      id-token: write # AWS OIDC (ECR)
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      app_env: ${{ steps.meta.outputs.app_env }}
+      compose_file: ${{ steps.meta.outputs.compose_file }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Derive environment from tag
+        id: meta
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          if [[ "$TAG" == *"-dev"* ]] || [[ "$TAG" == *"-st"* ]]; then
+            APP_ENV="dev"; CHANNEL_TAG="dev"
+          else
+            APP_ENV="prod"; CHANNEL_TAG="latest"
+          fi
+          {
+            echo "tag=$TAG"
+            echo "app_env=$APP_ENV"
+            echo "channel_tag=$CHANNEL_TAG"
+            echo "compose_file=docker-compose.$APP_ENV.yml"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      # {{REGISTRY_LOGIN_STEPS}}
+
+      - name: Build & Push image
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}
+            ${{ env.IMAGE }}:${{ steps.meta.outputs.channel_tag }}
+          build-args: |
+            APP_ENV=${{ steps.meta.outputs.app_env }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Show image digest
+        run: echo "Pushed ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }} - digest ${{ steps.build.outputs.digest }}"
+
+  # ─────────────────────────────────────────────────────────────
+  # 3. Record the new image tag in the environment's compose file
+  # ─────────────────────────────────────────────────────────────
+  update-compose:
+    name: Update compose file
+    needs: publish-image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-update-compose # serialize commits from overlapping releases
+      cancel-in-progress: false
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          # Uses RELEASE_BOT_TOKEN when the branch is protected; otherwise the workflow token is enough.
+          token: ${{ secrets.RELEASE_BOT_TOKEN || github.token }}
+
+      - name: Set image tag in ${{ needs.publish-image.outputs.compose_file }}
+        env:
+          FILE: ${{ needs.publish-image.outputs.compose_file }}
+          NEW_IMAGE: ${{ env.IMAGE }}:${{ needs.publish-image.outputs.tag }}
+        run: |
+          test -f "$FILE" || { echo "::error::$FILE not found"; exit 1; }
+          # Only lines marked "# release-image" are rewritten.
+          sed -E -i "s|^([[:space:]]*image:[[:space:]]*)[^[:space:]#]+([[:space:]]+# release-image.*)$|\1${NEW_IMAGE}\2|" "$FILE"
+          grep -q "image: ${NEW_IMAGE} " "$FILE" || { echo "::error::no '# release-image' line updated in $FILE"; exit 1; }
+          git diff -- "$FILE"
+
+      - name: Commit & push
+        env:
+          FILE: ${{ needs.publish-image.outputs.compose_file }}
+          TAG: ${{ needs.publish-image.outputs.tag }}
+          APP_ENV: ${{ needs.publish-image.outputs.app_env }}
+        run: |
+          if git diff --quiet -- "$FILE"; then
+            echo "$FILE already points to $TAG"; exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$FILE"
+          git commit -m "release: $TAG -> $APP_ENV ($FILE) [skip ci]"
+          git pull --rebase origin "${{ github.event.repository.default_branch }}"
+          git push origin "HEAD:${{ github.event.repository.default_branch }}"

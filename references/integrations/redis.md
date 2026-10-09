@@ -25,6 +25,7 @@ from functools import lru_cache
 from typing import Any
 
 from redis.asyncio import Redis
+from redis.asyncio.lock import Lock
 
 from app.core.config import get_settings
 
@@ -55,7 +56,7 @@ class RedisClient:
             await self.raw.expire(key, ttl)
         return value
 
-    def lock(self, name: str, timeout: float = 10):
+    def lock(self, name: str, timeout: float = 10) -> Lock:
         return self.raw.lock(name, timeout=timeout)
 
     async def ping(self) -> bool:

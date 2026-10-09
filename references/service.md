@@ -17,16 +17,36 @@ async def list_products(self, request: Request, query: ProductListQuery) -> Prod
 async def get_product(self, request: Request, product_id: uuid.UUID) -> ProductResponse
 ```
 
-- `Request` is `from fastapi import Request`, which is the incoming starlette request. It exposes `request.state` (request id, authenticated user set by middleware or dependencies), `request.headers` and `request.client`. Passing it everywhere keeps auth and tracing context available without changing signatures later.
+- `Request` is `from fastapi import Request`, which is the incoming starlette request. It exposes `request.state` (request id, authenticated user set by middleware or dependencies), `request.headers` and `request.client`. Use it only to *read* context; never build responses from it.
 - For endpoints without a body (GET/DELETE) that take filters, use a Pydantic **query model** (`ProductListQuery`). For a plain lookup by id, the path id is enough.
-- Errors are raised as `HTTPException` from **starlette**, with status codes from `starlette.status`:
+- Methods that background jobs also call (see `background_jobs.md`) may take `request: Request | None = None`.
+
+## Errors: raise domain exceptions, not HTTP exceptions
+
+Services raise the exceptions in `app/core/exceptions.py`. The handlers in `app/core/error_handlers.py` turn them into the standard error body, `{"detail", "code", "request_id", "errors"?}`, with the right status. Business logic therefore never imports Starlette/HTTP types, and the same service works from a route, a CLI command or a background worker.
 
 ```python
-from starlette import status
-from starlette.exceptions import HTTPException
+from app.core.exceptions import BusinessRuleError, ConflictError, NotFoundError
 
-raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+raise NotFoundError("Product not found")                         # 404, code "not_found"
+raise ConflictError("Product name already exists")               # 409, code "conflict"
+raise BusinessRuleError("Cannot archive a product with open orders", code="product_has_open_orders")  # 422
 ```
+
+| Situation | Exception | Status |
+|---|---|---|
+| Not found | `NotFoundError` | 404 |
+| Duplicate / unique violation | `ConflictError` | 409 |
+| Business rule violated | `BusinessRuleError` (custom `code=` per rule) | 422 |
+| Malformed input that Pydantic couldn't catch | `BadRequestError` | 400 |
+| Not authenticated | `UnauthorizedError` | 401 |
+| Not allowed | `ForbiddenError` | 403 |
+| Provider failed (datasource/core) | `ExternalServiceError` (datasource errors subclass it) | 502 |
+
+- **Duplicates:** check first for a clear message, **and** catch `sqlalchemy.exc.IntegrityError` around the write, because check-then-write races under concurrency. Apply this on create, and on update when a unique field changes.
+- **Machine-readable codes:** give business rules a specific `code=` (`"insufficient_stock"`); clients switch on `code`, humans read `detail`.
+- **New exception types:** for a recurring case, subclass `AppError` in `app/core/exceptions.py`, with its own `status_code`, `code` and `message`.
+- **`HTTPException`** is fine in routers and HTTP-only dependencies, which are the HTTP edge. The handler formats it with the same body.
 
 ## Template
 
@@ -38,10 +58,9 @@ from typing import Annotated
 from fastapi import Depends, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette import status
-from starlette.exceptions import HTTPException
 
 from app.core.database import get_session
+from app.core.exceptions import ConflictError, NotFoundError
 from app.product.model.product_model_domain import (
     ProductCreateRequest,
     ProductListQuery,
@@ -61,18 +80,18 @@ class ProductService:
 
     async def create_product(self, request: Request, body: ProductCreateRequest) -> ProductResponse:
         if await self.product_repository.exists_by_name(body.name):
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Product name already exists")
+            raise ConflictError("Product name already exists")
         try:
             product = await self.product_repository.create(body.model_dump())
-        except IntegrityError as exc:  # concurrent insert won the race on the unique constraint
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Product name already exists") from exc
+        except IntegrityError as exc:  # a concurrent insert won the race on the unique constraint
+            raise ConflictError("Product name already exists") from exc
         logger.info("product created id=%s", product.id)
         return ProductResponse.model_validate(product)
 
     async def get_product(self, request: Request, product_id: uuid.UUID) -> ProductResponse:
         product = await self.product_repository.get_by_id(product_id)
         if product is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+            raise NotFoundError("Product not found")
         return ProductResponse.model_validate(product)
 
     async def list_products(self, request: Request, query: ProductListQuery) -> ProductListResponse:
@@ -93,44 +112,42 @@ class ProductService:
         if "name" in values:
             existing = await self.product_repository.get_by_name(values["name"])
             if existing is not None and existing.id != product_id:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Product name already exists")
+                raise ConflictError("Product name already exists")
         try:
             product = await self.product_repository.update(product_id, values)
         except IntegrityError as exc:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Product name already exists") from exc
+            raise ConflictError("Product name already exists") from exc
         if product is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+            raise NotFoundError("Product not found")
         return ProductResponse.model_validate(product)
 
     async def delete_product(self, request: Request, product_id: uuid.UUID) -> None:
         if not await self.product_repository.delete(product_id):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+            raise NotFoundError("Product not found")
+
+
+def build_product_service(session: AsyncSession) -> ProductService:
+    """Plain factory: usable from routes (below), background jobs and scripts (with session_scope())."""
+    return ProductService(product_repository=ProductRepository(session, ProductDao()))
 
 
 def get_product_service(session: Annotated[AsyncSession, Depends(get_session)]) -> ProductService:
-    return ProductService(product_repository=ProductRepository(session, ProductDao()))
+    return build_product_service(session)
 ```
 
-## The factory (`get_<feature>_service`)
-- It sits at the bottom of the service file and builds the whole object graph per request: session → DAO → datasource → repository → service.
-- **Shared session:** every repository in one service must receive the **same** session (FastAPI caches `get_session` per request), so a multi-repository operation is one transaction.
-- **Core clients:** inject them with their own dependency getters, e.g. `storage: Annotated[S3Storage, Depends(get_s3_storage)]`, and pass them to the datasource or service.
-- **Services using another feature's repositories:** construct those repositories in this factory too. Import the other feature's repository and DAO here; the service class itself only sees repositories.
+## The two factories
+- **`build_<feature>_service(session, ...)`** is a plain function. It builds the whole object graph: DAO → datasource → repository → service.
+  - Every repository receives the **same** session, so a multi-repository operation is one transaction.
+  - Other features' repositories are built here too.
+  - Core clients are passed in as parameters, or taken from their cached getters (`get_s3_storage()`).
+- **`get_<feature>_service(...)`** is the FastAPI dependency. It only resolves `Depends(...)` (session, `get_http_client`, …) and calls `build_<feature>_service`.
+
+  Background jobs and scripts call the plain factory with `async with session_scope() as session:` (see `background_jobs.md`). That way the business logic has one wiring path, not two.
 
 ## Rules
-- **Allowed dependencies:** repositories and core classes only. A service never imports a DAO or datasource *for use inside the class*. The factory imports the DAO only to construct the repository.
+- **Allowed dependencies:** repositories and core classes only. A service never uses a DAO or datasource *inside the class*. The factories import the DAO only to construct the repository.
 - **Return types:** always a Pydantic model (or `None` for 204). Map with `Model.model_validate(orm)`. Never return ORM objects to the router; serialization outside the session can trigger lazy loads that fail in async.
-- **Error mapping:**
-
-| Situation | Status |
-|---|---|
-| Not found | 404 |
-| Duplicate/unique violation | 409. Check first for a clear message, **and** catch `sqlalchemy.exc.IntegrityError` around the write, because check-then-write races under concurrency. Apply this on create **and** on update when a unique field changes. |
-| Business rule violated | 422 or 400 |
-| Not authenticated | 401 |
-| Forbidden | 403 |
-| External provider failed (datasource exception) | 502/503 |
-
-  Catch datasource and domain exceptions here and re-raise as `HTTPException(...) from exc`.
+- **External failures:** let datasource exceptions (subclasses of `ExternalServiceError`) propagate, or catch them to add context or a fallback.
 - **Missing methods:** if a needed repository method doesn't exist, create it (follow `repository.md`, and `dao.md` for any new statement) before writing the service method.
-- **Empty scaffolds:** when the user asks only to scaffold a service, generate the class, the constructor and the factory, plus one method per agreed endpoint. Leave a body that raises `HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Not implemented")`, so the route exists and is honest about it.
+- **Empty scaffolds:** when the user asks only to scaffold a service, generate the class and factories plus one method per agreed endpoint. Make each body `raise NotImplementedAppError()` (501), so the route exists and is honest about it.
+- **Tests:** every service method gets tests (see `testing.md`): a unit test with mocked repositories for each rule and error, plus API tests for the happy path.

@@ -32,11 +32,10 @@ import jwt
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
-from starlette import status
 from starlette.concurrency import run_in_threadpool
-from starlette.exceptions import HTTPException
 
 from app.core.config import Settings, get_settings
+from app.core.exceptions import UnauthorizedError
 
 
 class CognitoUser(BaseModel):
@@ -67,11 +66,11 @@ class CognitoVerifier:
                 options={"verify_aud": self.token_use == "id"},
             )
         except jwt.PyJWTError as exc:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+            raise UnauthorizedError("Invalid token", code="invalid_token") from exc
         if claims.get("token_use") != self.token_use:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Wrong token use")
+            raise UnauthorizedError("Wrong token use", code="invalid_token")
         if self.token_use == "access" and claims.get("client_id") != self.client_id:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Wrong client")
+            raise UnauthorizedError("Wrong client", code="invalid_token")
         return CognitoUser(
             sub=claims["sub"],
             username=claims.get("username") or claims.get("cognito:username"),
@@ -95,7 +94,7 @@ async def get_cognito_user(
     verifier: Annotated[CognitoVerifier, Depends(get_cognito_verifier)],
 ) -> CognitoUser:
     if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+        raise UnauthorizedError()
     user = await verifier.verify(credentials.credentials)
     request.state.user_sub = user.sub
     return user

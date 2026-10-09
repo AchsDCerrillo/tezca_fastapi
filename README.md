@@ -93,33 +93,43 @@ Re-run the script after pulling plugin updates.
 
 | Skill | What it does |
 |---|---|
-| `/tezca-fastapi:start-fast-api` | New project (or bring an existing one up to standard): `app/core` (settings, async engine, base models, logging, request-id middleware), `app/app_router.py`, Alembic in `sql/`, Dockerfile, docker-compose (db → **migrate** → api), `.env` files, README with build/push commands, plus any integrations you choose. PostgreSQL by default. |
-| `/tezca-fastapi:add-new-feature` | A whole feature: models (db + domain), migration, DAO, optional datasource, repository, service, router, registration. Finishes partially built features without breaking them. |
-| `/tezca-fastapi:add-core` | A reusable client in `app/core`: S3, R2, CloudFront, Redis, payments (Stripe or another provider), JWT security, Cognito, Secrets Manager, email, shared HTTP client, or any other SDK. |
+| `/tezca-fastapi:start-fast-api` | New project (or bring an existing one up to standard): `app/core` (settings, async engine, base models, domain exceptions + one JSON error format, logging, request-id middleware), `app/app_router.py`, Alembic in `sql/`, pytest harness, ruff/mypy/pre-commit/Makefile, GitHub Actions CI/CD (lint + tests on PRs; on each release: tests → build → push to any registry → new tag committed into `docker-compose.<env>.yml`), Dockerfile, docker-compose (db → **migrate** → api), `.env` files, README, plus any integrations you choose. PostgreSQL by default. |
+| `/tezca-fastapi:add-new-feature` | A whole feature: models (db + domain), migration, DAO, optional datasource, repository, service, router, registration, optional background jobs, and tests that pass. Finishes partially built features without breaking them. |
+| `/tezca-fastapi:add-core` | A reusable client in `app/core`: S3, R2, CloudFront, Redis, background jobs (ARQ worker + cron), payments (Stripe or another provider), JWT security, Cognito, Secrets Manager, email, shared HTTP client, or any other SDK. |
 | `/tezca-fastapi:work-dao` | Tables and columns: SQLAlchemy models, Pydantic mirror, DAO statements, Alembic migration (autogenerate → review → apply). |
 | `/tezca-fastapi:work-datastore` | A feature datasource over a core client or a 3rd-party API. |
 | `/tezca-fastapi:work-repository` | Repository methods that execute DAO statements and combine datasource/core calls; they return SQLAlchemy models. |
-| `/tezca-fastapi:work-service` | Business logic + endpoint: `(request: Request, body: Model) -> Response`, starlette `HTTPException`/`status`, a DI factory, and a route registered in `app_router.py`. |
+| `/tezca-fastapi:work-tests` | Tests per feature: DAO statement tests (no DB), service unit tests with mocked repositories, API tests against a real Postgres (testcontainers / CI service), run against the real migrations. Sets up the harness if missing. |
+| `/tezca-fastapi:work-service` | Business logic + endpoint: `(request: Request, body: Model) -> Response` raising domain exceptions (`NotFoundError`, `ConflictError`, …), `build_`/`get_` factories, tests, and a route registered in `app_router.py`. |
 
 The skills also trigger from plain requests ("add an orders module", "connect redis", "add a phone column to users").
 
 ## Generated project layout
 
 ```
-main.py  alembic.ini  requirements.txt  Dockerfile  docker-compose.yml  .env.example  README.md
-scripts/entrypoint.sh
+main.py  alembic.ini  requirements.txt  requirements-dev.txt  pyproject.toml  Makefile
+Dockerfile  docker-compose.yml  .env.example  README.md  .pre-commit-config.yaml
+.github/workflows/ci.yml  .github/workflows/release.yml  docker-compose.prod.yml  docker-compose.dev.yml
+scripts/entrypoint.sh  worker.py (if ARQ)
 sql/                     env.py, script.py.mako, versions/   (Alembic, async)
 app/app_router.py        every feature router is registered here
-app/core/                config.py database.py models.py model_registry.py logging.py middleware.py <integrations>.py
+app/core/                config.py database.py models.py model_registry.py logging.py middleware.py
+                         exceptions.py error_handlers.py <integrations>.py
 app/<feature>/
   model/<feature>_model_db.py       SQLAlchemy
   model/<feature>_model_domain.py   Pydantic
   <feature>_dao.py                  builds statements (no session)
   <feature>_datasource.py           external data (optional)
   <feature>_repository.py           executes statements, returns ORM models
-  <feature>_service.py              business logic → Pydantic, + get_<feature>_service()
+  <feature>_service.py              business logic → Pydantic, raises domain exceptions, + build_/get_ factories
+  <feature>_jobs.py                 optional background jobs
   <feature>_router.py               HTTP only
+tests/<feature>/                    test_<feature>_dao.py, _service.py, _api.py
 ```
+
+Every error reaches clients as `{"detail", "code", "request_id"}`. Quality gate: `make check` (ruff, mypy, pytest), also run in CI.
+
+Shipping: `gh release create v1.4.0 --generate-notes`. The release workflow runs the tests, pushes `IMAGE:v1.4.0` (+ `latest`) and commits the new tag into `docker-compose.prod.yml`. Tags containing `-dev`/`-st` go to `docker-compose.dev.yml` instead.
 
 Migrations:
 - Every `docker compose up --build` runs the `migrate` service (`alembic upgrade head`) before the API starts.

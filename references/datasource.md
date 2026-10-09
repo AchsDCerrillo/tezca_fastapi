@@ -34,12 +34,16 @@ from typing import Any
 import httpx
 
 from app.core.config import Settings
+from app.core.exceptions import ExternalServiceError
 
 logger = logging.getLogger(__name__)
 
 
-class ShippingRateError(Exception):
-    """The shipping provider failed or returned something unusable."""
+class ShippingRateError(ExternalServiceError):
+    """The shipping provider failed or returned something unusable (-> 502 with code shipping_unavailable)."""
+
+    code = "shipping_unavailable"
+    message = "Shipping provider unavailable"
 
 
 class ShippingDatasource:
@@ -59,7 +63,7 @@ class ShippingDatasource:
             response.raise_for_status()
         except httpx.HTTPError as exc:
             logger.warning("shipping rates request failed: %s", exc)
-            raise ShippingRateError(str(exc)) from exc
+            raise ShippingRateError() from exc
         return response.json()["rates"]
 ```
 
@@ -67,6 +71,6 @@ class ShippingDatasource:
 - **Wiring:** receive clients through the constructor. Shared clients come from `app/core` (`get_http_client()`, `get_s3_storage()`, `get_redis()`); never create a new `httpx.AsyncClient` or boto session per call, because connection pools are expensive.
 - **Configuration:** URLs, keys and bucket names come from `Settings` (add them to `config.py` and `.env.example`). Never hardcode them.
 - **Return values:** return plain Python data (dicts, dataclasses, primitives, or small Pydantic models that describe the *external* payload). Never return SQLAlchemy models; the datasource does not know our database.
-- **Errors:** raise a small, named exception (like `ShippingRateError`) instead of leaking `httpx`/`botocore` errors. The service maps it to an HTTP status (often 502/503).
+- **Errors:** raise a small, named exception that **subclasses `ExternalServiceError`** (from `app/core/exceptions.py`), like `ShippingRateError`, instead of leaking `httpx`/`botocore` errors. It reaches the client as a 502 with its own `code` without the service having to map it. The service may still catch it to add a fallback.
 - **Missing core client:** if the needed client doesn't exist in `app/core`, create it with the **add-core** workflow first; the datasource then wraps it.
 - **Where it's used:** only the repository uses the datasource. The service never imports a datasource directly.

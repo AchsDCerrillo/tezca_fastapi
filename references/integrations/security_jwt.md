@@ -32,10 +32,9 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pwdlib import PasswordHash
 from pydantic import BaseModel
-from starlette import status
-from starlette.exceptions import HTTPException
 
 from app.core.config import Settings, get_settings
+from app.core.exceptions import ForbiddenError, UnauthorizedError
 
 TokenType = Literal["access", "refresh"]
 
@@ -75,12 +74,12 @@ class SecurityService:
         try:
             data = jwt.decode(token, self.settings.jwt_secret_key, algorithms=[self.settings.jwt_algorithm])
         except jwt.ExpiredSignatureError as exc:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired") from exc
+            raise UnauthorizedError("Token expired", code="token_expired") from exc
         except jwt.InvalidTokenError as exc:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+            raise UnauthorizedError("Invalid token", code="invalid_token") from exc
         payload = TokenPayload.model_validate(data)
         if payload.type != expected_type:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Wrong token type")
+            raise UnauthorizedError("Wrong token type", code="invalid_token")
         return payload
 
 
@@ -98,7 +97,7 @@ async def get_current_token(
     security: Annotated[SecurityService, Depends(get_security)],
 ) -> TokenPayload:
     if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+        raise UnauthorizedError()
     payload = security.decode_token(credentials.credentials)
     request.state.user_id = payload.sub      # services read it from request.state
     return payload
@@ -107,7 +106,7 @@ async def get_current_token(
 def require_scopes(*required: str):
     async def checker(token: Annotated[TokenPayload, Depends(get_current_token)]) -> TokenPayload:
         if not set(required).issubset(token.scopes):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+            raise ForbiddenError("Insufficient permissions")
         return token
     return checker
 ```

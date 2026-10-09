@@ -12,9 +12,10 @@
 ```
 main.py                 FastAPI app, lifespan, middleware, /health
 app/app_router.py       every feature router is registered here
-app/core/               config, database, base models, logging, integrations
+app/core/               config, database, base models, exceptions + error handlers, logging, integrations
 app/<feature>/          model/ (db + domain), dao, datasource, repository, service, router
 sql/                    Alembic environment + versions/ (all schema changes)
+tests/                  pytest: dao (no DB), service (mocked repos), api (real DB)
 ```
 Request flow: `router → service → repository → dao / datasource → database / external`.
 
@@ -41,6 +42,26 @@ ENVIRONMENT=dev alembic upgrade head        # apply migrations
 ENVIRONMENT=dev uvicorn main:app --reload   # http://localhost:8000/docs
 ```
 
+## Development
+```bash
+make install      # dev dependencies + pre-commit hook (ruff, mypy on every commit)
+make format       # ruff fix + format
+make lint         # ruff check + format check
+make typecheck    # mypy
+make test         # pytest: unit + API tests against a throwaway Postgres (needs Docker)
+make check        # lint + typecheck + test
+```
+- **Tests:** tests live in `tests/`, mirroring `app/`. The run applies the Alembic migrations to a fresh database, and each test is rolled back.
+- **Without Docker:** set `TEST_DATABASE_HOST/PORT/USER/PASSWORD/NAME` to use an existing database. `TEST_SKIP_DB=1 pytest -m "not integration"` runs only the unit tests.
+- **CI:** `.github/workflows/ci.yml` runs lint, type-check, tests and a Docker build on every PR and on pushes to `main`.
+
+## Error format
+Every error response has the same shape:
+```json
+{"detail": "Product not found", "code": "not_found", "request_id": "3f2c9a..."}
+```
+Validation errors (422) add an `errors` list. Clients should switch on `code`. `request_id` matches the `X-Request-ID` response header and the logs.
+
 ## Run everything with Docker Compose
 ```bash
 docker compose up --build        # db -> migrate (alembic upgrade head) -> api
@@ -57,11 +78,34 @@ ENVIRONMENT=dev alembic downgrade -1
 ENVIRONMENT=dev alembic history --verbose
 ENVIRONMENT=dev alembic upgrade head --sql      # print SQL only
 # or inside compose:
-docker compose run --rm migrate alembic revision --autogenerate -m "..."
+docker compose run --rm -v "$PWD/sql/versions:/app/sql/versions" migrate alembic revision --autogenerate -m "..."
 ```
 Always review the generated file in `sql/versions/` before applying it.
 
-## Build & push the image
+## Releases (CI/CD)
+Publishing a GitHub release runs `.github/workflows/release.yml`:
+1. lint + type-check + tests (the same gate as `ci.yml`);
+2. build the image and push `{{IMAGE_REPOSITORY}}:<tag>`, plus `:latest` (prod) or `:dev` (dev);
+3. write the new tag into `docker-compose.<env>.yml` and commit it to the default branch.
+
+| Release tag | Environment | Compose file updated |
+|---|---|---|
+| `v1.4.0` | prod | `docker-compose.prod.yml` |
+| `v1.4.0-dev.1`, `v1.4.0-st` | dev | `docker-compose.dev.yml` |
+
+```bash
+gh release create v1.4.0 --generate-notes                          # ship to prod
+gh release create v1.4.0-dev.1 --prerelease --generate-notes       # ship to dev
+```
+Deploy on the server (migrations run first through the `migrate` service):
+```bash
+git pull
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+```
+**Required secrets:** {{CI_SECRETS}}. If the default branch is protected, also add `RELEASE_BOT_TOKEN` (a token with `contents: write` that can bypass the rule), so the workflow can commit the compose update.
+
+## Build & push the image manually
 ```bash
 IMAGE={{IMAGE_REPOSITORY}}
 TAG=$(git rev-parse --short HEAD)

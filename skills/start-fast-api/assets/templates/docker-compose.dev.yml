@@ -1,0 +1,27 @@
+# dev deployment - runs the image published by .github/workflows/release.yml.
+# The release workflow rewrites the line marked "# release-image" with the new tag and commits it,
+# so this file always says which version dev should run.
+#
+# On the server:  docker compose -f docker-compose.dev.yml pull && docker compose -f docker-compose.dev.yml up -d
+# The database is external (managed Postgres): set DATABASE_* in .env.dev on the server.
+
+x-app: &app
+  image: {{IMAGE_REPOSITORY}}:dev # release-image
+  env_file: .env.dev
+  environment:
+    ENVIRONMENT: dev
+  restart: unless-stopped
+
+services:
+  migrate:
+    <<: *app
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+
+  api:
+    <<: *app
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully

@@ -44,7 +44,12 @@ Follow `migrations.md`.
 4. Show the user the `upgrade()`/`downgrade()` body and **ask** before running `ENVIRONMENT=dev alembic upgrade head`. Mention that `docker compose up --build` also applies it through the `migrate` service.
 5. Optional sanity check: `alembic downgrade -1 && alembic upgrade head` on a dev database.
 
-## Step 4: Report
+## Step 4: Test
+- **DAO tests:** add or extend `tests/<feature path>/test_<feature>_dao.py` with one test per new or changed statement (`testing.md`).
+- **Run:** `pytest tests/<feature path> -q`. The test run applies all migrations to a fresh database, so a broken migration fails here too.
+- **Lint and types:** `make lint typecheck`.
+
+## Step 5: Report
 List:
 - the model/DAO/domain files touched;
 - the migration file and whether it was applied;

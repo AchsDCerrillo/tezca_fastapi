@@ -21,13 +21,13 @@ from app.product.model.product_model_db import Product, ProductStatus
 class ProductDao:
     """Builds SQLAlchemy statements for the products table. Never executes them."""
 
-    def select_by_id(self, product_id: uuid.UUID, *, with_category: bool = False) -> Select[tuple[Product]]:
+    def select_by_id(self, product_id: uuid.UUID, *, with_category: bool = False) -> Select[Product]:
         stmt = select(Product).where(Product.id == product_id)
         if with_category:
             stmt = stmt.options(selectinload(Product.category))
         return stmt
 
-    def select_by_name(self, name: str) -> Select[tuple[Product]]:
+    def select_by_name(self, name: str) -> Select[Product]:
         return select(Product).where(Product.name == name)
 
     def select_all(
@@ -37,11 +37,11 @@ class ProductDao:
         search: str | None = None,
         offset: int = 0,
         limit: int = 50,
-    ) -> Select[tuple[Product]]:
+    ) -> Select[Product]:
         stmt = self._apply_filters(select(Product), status=status, search=search)
         return stmt.order_by(Product.created_at.desc()).offset(offset).limit(limit)
 
-    def count(self, *, status: ProductStatus | None = None, search: str | None = None) -> Select[tuple[int]]:
+    def count(self, *, status: ProductStatus | None = None, search: str | None = None) -> Select[int]:
         return self._apply_filters(select(func.count()).select_from(Product), status=status, search=search)
 
     def insert(self, values: dict[str, Any]) -> Insert:
@@ -53,11 +53,11 @@ class ProductDao:
     def delete_by_id(self, product_id: uuid.UUID) -> Delete:
         return delete(Product).where(Product.id == product_id)
 
-    def exists_by_name(self, name: str) -> Select[tuple[bool]]:
+    def exists_by_name(self, name: str) -> Select[bool]:
         return select(select(Product.id).where(Product.name == name).exists())
 
     @staticmethod
-    def _apply_filters(stmt: Select, *, status: ProductStatus | None, search: str | None) -> Select:
+    def _apply_filters[T](stmt: Select[T], *, status: ProductStatus | None, search: str | None) -> Select[T]:
         if status is not None:
             stmt = stmt.where(Product.status == status)
         if search:
@@ -68,7 +68,7 @@ class ProductDao:
 
 ## Rules
 - **Inputs:** method arguments are plain values or `dict[str, Any]`, never Pydantic models. The DAO should not depend on the API shape; the repository converts with `body.model_dump(exclude_unset=True)`.
-- **Return types:** return type-annotated statements: `Select[tuple[Model]]`, `Insert`, `Update`, `Delete`.
+- **Return types:** return type-annotated statements: `Select[Model]` for one entity, `Select[int]` / `Select[bool]` for scalars, `Insert`, `Update`, `Delete`. This is SQLAlchemy 2.1 typing; `Select[tuple[Model]]` was the 2.0 form, and mypy rejects it on 2.1. Shared filter helpers are generic (`def _apply_filters[T](stmt: Select[T], ...) -> Select[T]`), so mypy keeps checking through them.
 - **Naming:** `select_*` for reads, `count*`, `exists_*`, `insert`, `insert_many`, `update_*`, `delete_*`, `soft_delete_*`.
 - **One DAO per table.** A feature with two tables gets two DAO classes; both may live in `<feature>_dao.py`.
 - **RETURNING:** `insert(...).returning(Model)` and `update(...).returning(Model)` give the repository a fully loaded ORM object in a single round trip. Postgres, SQLite ≥ 3.35 and MariaDB support RETURNING. **MySQL does not.** On MySQL, return the statement without `.returning()` and let the repository re-select by id, or have the DAO expose `new(values) -> Model` so the repository can `session.add()` it. Check `DATABASE_DRIVER` in config before choosing.

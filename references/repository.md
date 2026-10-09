@@ -10,8 +10,9 @@ The repository is where database operations actually happen. It:
 ```python
 import uuid
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
+from sqlalchemy import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.product.model.product_model_db import Product, ProductStatus
@@ -58,7 +59,7 @@ class ProductRepository:
         return result.one_or_none()
 
     async def delete(self, product_id: uuid.UUID) -> bool:
-        result = await self.session.execute(self.dao.delete_by_id(product_id))
+        result = cast(CursorResult[Any], await self.session.execute(self.dao.delete_by_id(product_id)))
         return result.rowcount > 0
 
     async def exists_by_name(self, name: str) -> bool:
@@ -66,15 +67,18 @@ class ProductRepository:
 
     # Example of a whole operation combining dao + datasource
     async def create_with_image(self, values: dict[str, Any], image: bytes, content_type: str) -> Product:
+        if self.datasource is None:
+            raise RuntimeError("ProductRepository was built without a datasource")
         product = await self.create(values)
-        key = await self.datasource.upload_image(product.id, image, content_type)
-        return await self.update(product.id, {"image_key": key})
+        product.image_key = await self.datasource.upload_image(product.id, image, content_type)
+        await self.session.flush()
+        return product
 ```
 
 ## Rules
-- **Session:** the repository receives the `AsyncSession` and the DAO (and the datasource / core clients if needed) through its constructor. The service factory wires them (see `service.md`).
+- **Session:** the repository receives the `AsyncSession` and the DAO (and the datasource / core clients if needed) through its constructor. `build_<feature>_service` wires them (see `service.md`).
 - **Commits:** never `commit()`. `get_session` in `app/core/database.py` commits when the request succeeds and rolls back on any exception, so one HTTP request equals one transaction, no matter how many repositories the service touches. Use `await self.session.flush()` when you need generated values mid-operation.
-- **Errors:** don't raise HTTP errors here. Report "not found" with `None` / `False`; the service decides what that means for the client. Let database exceptions (e.g. `IntegrityError`) propagate, or translate them into a small domain exception if the user wants that, and let the service map it to an HTTP status.
+- **Errors:** don't raise HTTP errors here. Report "not found" with `None` / `False`; the service decides what that means for the client. Let database exceptions (e.g. `IntegrityError`) propagate; the service turns them into domain exceptions (`IntegrityError` → `ConflictError`). The repository never raises `app.core.exceptions` errors itself, because deciding what "missing" means is business logic.
 - **Inputs:** plain values or `dict[str, Any]`. The service converts Pydantic with `body.model_dump(exclude_unset=True)`.
 - **Direct core calls:** core classes (e.g. `RedisClient` for caching) may be called directly from the repository when wrapping them in a datasource would add nothing.
 - **Missing DAO statements:** if a method needs a statement the DAO doesn't have, add it to the DAO first (follow `dao.md`). Don't build statements inline in the repository; keeping them in the DAO is what makes queries reviewable.

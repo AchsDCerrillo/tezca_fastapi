@@ -26,7 +26,8 @@ import uuid
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Enum as SAEnum, ForeignKey, Index, Numeric, String, Text
+from sqlalchemy import Enum as SAEnum
+from sqlalchemy import ForeignKey, Index, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.models import Base, TimestampMixin, UUIDPkMixin
@@ -94,6 +95,7 @@ Add `import app.<feature>.model.<feature>_model_db  # noqa: F401` to `app/core/m
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -116,8 +118,8 @@ class ProductUpdateRequest(BaseModel):
 
     @field_validator("name", "price", "status")
     @classmethod
-    def not_null(cls, value):
-        # Omitting a field = "don't change it"; sending an explicit null for a NOT NULL column is an error (422, not a DB 500).
+    def not_null(cls, value: Any) -> Any:
+        # Omitted field = "don't change it"; an explicit null on a NOT NULL column is a 422, not a DB 500.
         if value is None:
             raise ValueError("may not be null")
         return value

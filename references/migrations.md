@@ -10,13 +10,14 @@ Don't use `Base.metadata.create_all()` at startup. It can create tables but neve
 # 1. change/add models in app/<feature>/model/<feature>_model_db.py
 # 2. make sure the module is imported in app/core/model_registry.py
 # 3. generate the migration (needs a reachable database with the current schema)
-alembic revision --autogenerate -m "create products table"
+ENVIRONMENT=dev alembic revision --autogenerate -m "create products table"   # or: make migration m="..."
 # 4. REVIEW the generated file in sql/versions/ (see checklist below)
 # 5. apply it
-alembic upgrade head
+ENVIRONMENT=dev alembic upgrade head                                          # or: make migrate
 ```
+`ENVIRONMENT=dev` loads `.env.dev` (localhost + the compose DB port). Without it, the defaults in `config.py` apply.
 
-Other useful commands:
+Other useful commands (prefix them with `ENVIRONMENT=dev` too):
 
 ```bash
 alembic current                 # revision the DB is at
@@ -29,9 +30,11 @@ With docker compose:
 
 ```bash
 docker compose up -d db
-docker compose run --rm api alembic revision --autogenerate -m "..."
-docker compose run --rm api alembic upgrade head
+docker compose run --rm migrate                                    # alembic upgrade head inside the stack
+# Generating a revision inside a container needs a bind mount, or the new file is lost with the container:
+docker compose run --rm -v "$PWD/sql/versions:/app/sql/versions" migrate alembic revision --autogenerate -m "..."
 ```
+Prefer `make migration m="..."` on the host; the compose variant is for machines without a local Python environment.
 
 Running locally against the compose database: the `.env.dev` `DATABASE_HOST` must be `localhost` (not `db`). Run with `ENVIRONMENT=dev alembic ...`.
 

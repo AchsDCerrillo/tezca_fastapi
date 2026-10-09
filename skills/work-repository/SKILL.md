@@ -41,7 +41,7 @@ Follow `repository.md`:
 - **Existing methods:** keep their signatures stable. If a change would break callers, list them (`grep -rn "repository.<method>" app/`) and ask first.
 
 ## Step 4: Wire and verify
-- **Factory:** make sure `get_<feature>_service` (if it exists) constructs the repository with the new constructor arguments.
+- **Factory:** make sure `build_<feature>_service` (if it exists) constructs the repository with the new constructor arguments.
 - **Import check:** `python -c "import app.<feature>.<feature>_repository"`.
-- **Runtime test (if a DB is running):** offer a quick test by calling the method through the service/route, or a small pytest using a session from `async_session_factory`.
+- **Tests:** new repository methods are covered through the API tests (they run real SQL); new DAO statements get a DAO test (`testing.md`). Run `pytest tests/<feature path> -q`.
 - **Report:** methods added/changed, DAO statements added, and which service methods could use them. Suggest `work-service` to expose them.

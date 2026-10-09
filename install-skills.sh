@@ -253,7 +253,7 @@ for s in $SKILLS; do
     s/\. This is `\.\.\/\.\.\/references\/` relative to this skill.s base directory//g;
     s/`\$\{CLAUDE_PLUGIN_ROOT\}\/references\/` is `\.\.\/\.\.\/references\/` from this skill.s base directory\./`shared\/` is inside this skill\x27s folder./g;
     s/\$\{CLAUDE_PLUGIN_ROOT\}\/references\//shared\//g;
-    s/\$\{CLAUDE_PLUGIN_ROOT\}\/skills\/([a-z0-9-]+)\/SKILL\.md/..\/$p$1\/SKILL.md/g;
+    s/\$\{CLAUDE_PLUGIN_ROOT\}\/skills\/([a-z0-9-]+)\//..\/$p$1\//g;
     s/\$\{CLAUDE_PLUGIN_ROOT\}\/skills\//..\/ (sibling ${p}* skill folders)/g;
     s/`\/tezca-fastapi:([a-z0-9-]+)`/the `$p$1` skill/g;
     s/\/tezca-fastapi:([a-z0-9-]+)/$p$1/g;

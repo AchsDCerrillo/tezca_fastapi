@@ -12,8 +12,12 @@ RUN pip install -r requirements.txt
 
 # ---- runtime: slim image, non-root user ----
 FROM python:${PYTHON_VERSION}-slim AS runtime
+# APP_ENV is set by the release workflow (dev for -dev/-st tags, prod otherwise); a runtime
+# ENVIRONMENT variable (compose, ECS...) still overrides it.
+ARG APP_ENV=prod
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    ENVIRONMENT=${APP_ENV} \
     PATH="/opt/venv/bin:$PATH"
 RUN useradd --create-home --uid 1000 app
 WORKDIR /app
